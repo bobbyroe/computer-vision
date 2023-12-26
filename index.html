@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en" >
+<head>
+  <meta charset="UTF-8">
+  <title>Hand Tracking 2D</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #101010;
+    }
+    .output_canvas {
+      z-index: 1;
+      position: absolute;
+    }
+    #webcam, .output_canvas {
+     transform: rotateY(180deg);
+    }
+  </style>
+</head>
+<body>
+<body>
+  <div style="position: relative;">
+    <video id="webcam" style="position: absolute" autoplay playsinline></video>
+    <canvas class="output_canvas" id="output_canvas"></canvas>
+  </div>
+  <script type="module" src="./index.js"></script>
+</body>
+</html>
