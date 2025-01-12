@@ -1,43 +1,111 @@
-import getVisionStuff from "./getVisionStuff.js";
-import getEmitter from "./libs/getEmitter.js";
+import * as THREE from "three";
+// Mediapipe
+import vision from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+const { HandLandmarker, FilesetResolver } = vision;
 
-const { video, handLandmarker } = await getVisionStuff();
-const canvasElement = document.getElementById("output_canvas");
-const ctx = canvasElement.getContext("2d");
-canvasElement.width = window.innerWidth;
-canvasElement.height = window.innerWidth * 0.75;
+const w = window.innerWidth;
+const h = window.innerHeight;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const camera = new THREE.PerspectiveCamera(60, w / h, 1, 100);
+camera.position.z = 5;
+const scene = new THREE.Scene();
+scene.scale.x = -1;
 
-let mousePos = { x: window.innerWidth, y: window.innerHeight };
-const emitter = getEmitter();
+// Video Texture
+const video = document.createElement("video");
+const texture = new THREE.VideoTexture(video);
+texture.colorSpace = THREE.SRGBColorSpace;
+const geometry = new THREE.PlaneGeometry(1, 1);
+const material = new THREE.MeshBasicMaterial({
+  map: texture,
+  depthWrite: false,
+});
+const videomesh = new THREE.Mesh(geometry, material);
+scene.add(videomesh);
 
-function drawPoint(pos, hue) {
-  ctx.fillStyle = `hsla(${hue}, 100%, 50%, 1.0)`;
-  ctx.beginPath();
-  ctx.arc(pos.x, pos.y, 10, 0, Math.PI * 2, true);
-  ctx.fill();
+// MediaPipe
+const filesetResolver = await FilesetResolver.forVisionTasks(
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+);
+const handLandmarker = await HandLandmarker.createFromOptions(filesetResolver, {
+  baseOptions: {
+    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+    delegate: "GPU",
+  },
+  runningMode: "VIDEO",
+  numHands: 2,
+});
+if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+  navigator.mediaDevices
+    .getUserMedia({ video: { facingMode: "user" } })
+    .then(function (stream) {
+      video.srcObject = stream;
+      video.play();
+    })
+    .catch(function (error) {
+      console.error("Unable to access the camera/webcam.", error);
+    });
 }
 
-function animationLoop() {
-  ctx.clearRect(0, 0, canvasElement.width, canvasElement.height); // x, y, w, h
+// finger markers
+function getBall({ hasParticles = false, hue, index }) {
+  const opacity = 1; // index === 8 ? 1 : 0.1;
+  const geo = new THREE.IcosahedronGeometry(0.1, 1);
+  const color = new THREE.Color().setHSL(hue, 1, 0.5);
+  const mat = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.update = (landmark) => {
+    const { x, y, z } = landmark;
+    mesh.position.set(
+      x * videomesh.scale.x - videomesh.scale.x * 0.5,
+      -y * videomesh.scale.y + videomesh.scale.y * 0.5,
+      z
+    );
+    mesh.scale.setScalar(z * 10);
+  };
+  if (hasParticles) {
+    // no op.
+  }
+  return mesh;
+}
+const stuffGroup = new THREE.Group();
+scene.add(stuffGroup);
+const numBalls = 21;
+for (let i = 0; i < numBalls; i++) {
+  const mesh = getBall({ hue: i / numBalls, index: i, hasParticles: i === 8 });
+  stuffGroup.add(mesh);
+}
+
+function animation(t = 0) {
   if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
     const handResults = handLandmarker.detectForVideo(video, Date.now());
-    if (handResults.landmarks) {
+    if (handResults.landmarks.length > 0) {
       for (const landmarks of handResults.landmarks) {
-        landmarks.forEach((l, i) => {
-          let pos = {
-            x: l.x * canvasElement.width,
-            y: l.y * canvasElement.height,
-          };
-          const hue = (i * 360) / 21;
-          // drawPoint(pos, hue);
-          if (i === 8) {
-            mousePos = { x: l.x * canvasElement.width, y: l.y * canvasElement.height };
-          }
+        landmarks.forEach((landmark, i) => {
+          const mesh = stuffGroup.children[i];
+          mesh.update(landmark);
         });
+      }
+    } else {
+      for (let i = 0; i < numBalls; i++) {
+        const mesh = stuffGroup.children[i];
+        mesh.position.set(0, 0, 10);
       }
     }
   }
-  emitter.update(ctx, mousePos);
-  requestAnimationFrame(animationLoop);
+
+  videomesh.scale.x = video.videoWidth / 100;
+  videomesh.scale.y = video.videoHeight / 100;
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(animation);
 }
-animationLoop();
+animation();
